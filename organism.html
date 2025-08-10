@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Assimilated — Mini Card Game</title>
+  <style>
+    :root { --card-w: 120px; --card-h: 170px; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: #ffffff;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .wrapper { display: grid; gap: 12px; justify-items: center; }
+    #count { font-weight: 700; font-size: 1.05rem; }
+    #pile { position: relative; width: calc(var(--card-w) + 40px); height: calc(var(--card-h) + 20px); cursor: pointer; }
+
+    /* Back of cards in the pile */
+    .card {
+      position: absolute; top: 10px; left: 20px;
+      width: var(--card-w); height: var(--card-h);
+      border-radius: 12px; border: 2px solid #111;
+      box-shadow: 0 6px 16px rgba(0,0,0,.14);
+      background: repeating-linear-gradient(45deg,#ccd6dd 0 12px,#b6c4cc 12px 24px);
+      transform-origin: center center;
+    }
+    .card::after { content:""; position:absolute; inset:0; border-radius:inherit; box-shadow: inset 0 0 0 4px rgba(255,255,255,.55); }
+
+    /* Face-up reveal card */
+    .front {
+      position: absolute; top: 10px; left: 20px;
+      width: var(--card-w); height: var(--card-h);
+      border-radius: 12px; border: 3px solid #111;
+      background: #fff;
+      display: grid; place-items: center;
+      box-shadow: 0 14px 24px rgba(0,0,0,.18);
+      user-select: none;
+      cursor: pointer;
+      z-index: 5;
+
+      /* flip-back animation setup */
+      transform-style: preserve-3d;
+      transition: transform 320ms ease;
+    }
+    .front::before{ /* backside to show when flipping back */
+      content: "";
+      position: absolute; inset: 0; border-radius: 10px;
+      background: repeating-linear-gradient(45deg,#ccd6dd 0 12px,#b6c4cc 12px 24px);
+      border: 2px solid #111;
+      box-shadow: inset 0 0 0 4px rgba(255,255,255,.55);
+      transform: rotateY(180deg);
+      backface-visibility: hidden;
+    }
+    .front.flip-back { transform: rotateY(180deg); }
+
+    .front.safe { border-color: #10b981; }
+    .front.assimilated { border-color: #ef4444; }
+
+    .label { font-size: 1.25rem; font-weight: 800; letter-spacing: 0.04em; position: relative; backface-visibility: hidden; }
+    .label.safe { color: #059669; }
+    .label.assimilated { color: #b91c1c; }
+
+    .empty { position:absolute; top:10px; left:20px; width:var(--card-w); height:var(--card-h); border:2px dashed #999; border-radius:12px; display:grid; place-items:center; color:#666; background:#fff; }
+    .controls { display:flex; gap:8px; }
+    button { padding: 8px 14px; border-radius: 999px; border:1px solid #1f2937; background:#111827; color:#fff; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    #status { font-size:.95rem; color:#374151; min-height:1.2em; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div id="count">Cards left: 3</div>
+    <div id="pile" aria-label="Card pile" role="button" title="Click the pile to flip a card"></div>
+    <div id="status">Last flip: —</div>
+    <div class="controls">
+      <button id="shuffleBtn" type="button">Shuffle</button>
+      <button id="resetBtn" type="button">Reset</button>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const countEl = document.getElementById('count');
+      const pileEl = document.getElementById('pile');
+      const statusEl = document.getElementById('status');
+      const shuffleBtn = document.getElementById('shuffleBtn');
+      const resetBtn = document.getElementById('resetBtn');
+
+      const INITIAL = ['Assimilated','Safe','Safe'];
+      let deck = [];
+      let revealed = null; // currently face-up card value (temporarily removed from deck)
+      let isFlippingBack = false; // guard to prevent double-resolve during animation
+
+      function shuffle(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+      }
+
+      function init(resetStatus = true) {
+        deck = INITIAL.slice();
+        shuffle(deck);
+        revealed = null;
+        isFlippingBack = false;
+        if (resetStatus) statusEl.textContent = 'Last flip: —';
+        render();
+      }
+
+      function render() {
+        countEl.textContent = 'Cards left: ' + deck.length;
+        pileEl.innerHTML = '';
+
+        if (deck.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'Empty';
+          pileEl.appendChild(empty);
+        } else {
+          deck.forEach((_, idx) => {
+            const c = document.createElement('div');
+            c.className = 'card';
+            c.style.transform = `translate(${idx * 6}px, ${-idx * 2}px)`;
+            pileEl.appendChild(c);
+          });
+        }
+
+        if (revealed !== null) {
+          const f = document.createElement('div');
+          const key = revealed.toLowerCase();
+          f.className = `front ${key === 'safe' ? 'safe' : 'assimilated'}`;
+          const label = document.createElement('div');
+          label.className = `label ${key === 'safe' ? 'safe' : 'assimilated'}`;
+          label.textContent = revealed;
+          f.appendChild(label);
+          f.setAttribute('aria-label','Revealed card. Click to flip back and shuffle.');
+          f.title = 'Click to flip back and shuffle';
+
+          f.addEventListener('click', () => {
+            if (isFlippingBack) return;
+            isFlippingBack = true;
+            // visually flip back first
+            f.classList.add('flip-back');
+
+            const resolve = () => {
+              // after flip completes, apply game rule then shuffle
+              if (revealed === 'Assimilated') {
+                deck.push('Assimilated'); // reinsert
+              }
+              // Safe stays removed
+              shuffle(deck);
+              statusEl.textContent = `Resolved: ${revealed}`;
+              revealed = null;
+              isFlippingBack = false;
+              render();
+            };
+
+            // Fallback in case transitionend doesn't fire
+            let done = false;
+            const onEnd = (e) => {
+              if (done) return;
+              if (!e || e.propertyName === 'transform') {
+                done = true;
+                f.removeEventListener('transitionend', onEnd);
+                resolve();
+              }
+            };
+            f.addEventListener('transitionend', onEnd);
+            setTimeout(onEnd, 400); // safety timeout
+          }, { once: true });
+
+          pileEl.appendChild(f);
+        }
+
+        // Disable shuffle while a card is revealed or while animating
+        shuffleBtn.disabled = revealed !== null || isFlippingBack;
+      }
+
+      function flipTop() {
+        if (!deck.length || revealed !== null || isFlippingBack) return;
+        const top = deck.pop(); // flip the top card (temporarily removed)
+        revealed = top;        // show it face-up; user click will flip it back and resolve
+        statusEl.textContent = 'Flipped: ' + top + ' — click the card to flip back and shuffle';
+        render();
+      }
+
+      pileEl.addEventListener('click', flipTop);
+      shuffleBtn.addEventListener('click', () => { if (revealed === null && !isFlippingBack) { shuffle(deck); render(); } });
+      resetBtn.addEventListener('click', () => init());
+
+      init();
+    })();
+  </script>
+</body>
+</html>
