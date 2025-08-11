@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Boiler Room</title>
+<style>
+  :root {
+    --card-w: 90px;              /* single card width */
+    --card-h: 130px;             /* single card height */
+    --half-w: 45px;              /* half-card step horizontally */
+    --half-h: 65px;              /* half-card step vertically */
+    --grid-cols: 9;              /* 9 cards wide */
+    --grid-rows: 9;              /* 9 cards high */
+    --table-scale: 0.8;         /* table is 20% smaller than full 9×9; cards keep size */
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    overflow: hidden;
+    height: 100dvh;
+    margin: 0;
+    background: #fff; /* page background now white */
+    color: #111;
+  }
+
+  /* Page background */
+body {
+    overflow: hidden; /* no page scroll */
+    display: block; /* app handles its own grid */
+    height: 100dvh;
+    background: #fff; /* page background now white */
+    color: #111;
+  }
+
+  .play-wrapper {
+    display: grid;
+    place-items: center;
+    padding: 8px;
+    height: 100%;
+  }
+
+  /* Layout: controls on the side */
+  .app {
+    height: 100%;
+    display: grid;
+    grid-template-columns: 1fr min(260px, 26vw);
+    grid-template-rows: 100%;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* The visible table area is scaled to 80% without shrinking the cards */
+  .play-area {
+    position: relative;
+    width: calc(var(--grid-cols) * var(--card-w) * var(--table-scale));
+    height: calc(var(--grid-rows) * var(--card-h) * var(--table-scale));
+    /* Ensure the table can always show at least one full card */
+    min-width: var(--card-w);
+    min-height: var(--card-h);
+  }
+
+  .table {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,0.25), inset 0 0 30px rgba(0,0,0,0.25);
+    background:
+      repeating-linear-gradient(
+        0deg,
+        rgba(255,255,255,0.05) 0px,
+        rgba(255,255,255,0.05) 6px,
+        rgba(0,0,0,0.05) 6px,
+        rgba(0,0,0,0.05) 12px
+      ),
+      linear-gradient(90deg, rgba(255,255,255,0.04), rgba(0,0,0,0.04));
+  }
+
+  /* subtle 9x9 grid sized to the scaled table */
+  .grid-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    z-index: 1;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: calc(var(--card-w) * var(--table-scale)) calc(var(--card-h) * var(--table-scale)),
+                     calc(var(--card-w) * var(--table-scale)) calc(var(--card-h) * var(--table-scale));
+  }
+
+  /* Deck sits INSIDE the scaled table, but cards keep their own pixel size */
+  .deck {
+    position: absolute; /* stack origin inside table */
+    width: var(--card-w);
+    height: var(--card-h);
+    z-index: 2; /* always above grid overlay */
+  }
+
+  .card {
+    position: absolute;
+    top: 0; left: 0;
+    width: var(--card-w);
+    height: var(--card-h);
+    border-radius: 10px;
+    border: 2px solid rgba(0,0,0,0.35);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+    background: #fff;
+    overflow: hidden;
+    transition: transform 200ms ease;
+  }
+
+  .card.cover {
+    background: linear-gradient(180deg, #cc1d1d, #990909);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+
+  .label-small { font-size: 12px; opacity: 0.9; }
+  .title { font-size: 20px; }
+
+  .quad {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    background: #f7f7f7;
+  }
+  .quad > div { border: 1px solid rgba(0,0,0,0.12); }
+
+  .xmark {
+    position: absolute;
+    width: 50%;
+    height: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    font-size: 38px;
+    color: #1d1d1d;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+  }
+
+  /* controls */
+  .controls {
+    display: grid;
+    grid-template-rows: auto auto 1fr; /* slider, buttons, hint space */
+    grid-auto-rows: auto;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(0,0,0,0.22);
+    backdrop-filter: blur(2px);
+    border-radius: 12px;
+    height: 100%;
+    align-content: start;
+  }
+  .controls-inner {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-auto-rows: 44px;
+    gap: 8px;
+    align-content: start;
+  }
+
+  .scale {
+    display: grid;
+    gap: 6px;
+  }
+  .scale label { color: #f1f1f1; font-size: 13px; display: flex; justify-content: space-between; }
+  .scale input[type="range"] { width: 100%; }
+
+  button {
+    font: 600 clamp(12px, 1.8vw, 14px)/1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 0;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 1px 10px rgba(0,0,0,0.35);
+    background: linear-gradient(180deg, #f0f0f0, #d7d7d7);
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .reset { background: linear-gradient(180deg, #ffd16a, #f2a71b); }
+
+  .hint { text-align: center; color: #f1f1f1; font-size: clamp(11px, 1.6vw, 13px); opacity: 0.9; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="play-wrapper" id="wrapper">
+      <div class="play-area" id="playArea">
+        <div class="table" id="table">
+          <div class="grid-overlay" aria-hidden="true"></div>
+          <div class="deck" id="deck"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls" id="controls">
+      <div class="scale">
+        <label for="scaleRange">Table size <span id="scaleOut">80%</span></label>
+        <input type="range" id="scaleRange" min="0.4" max="1.2" step="0.05" value="0.8" />
+      </div>
+      <div class="controls-inner">
+        <button id="btnUp" aria-label="Up">▲ Up</button>
+        <button id="btnDown" aria-label="Down">Down ▼</button>
+        <button id="btnLeft" aria-label="Left">◀ Left</button>
+        <button id="btnRight" aria-label="Right">Right ▶</button>
+        <button id="btnReset" class="reset" aria-label="Reset">⟲ Reset</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const tableEl = document.getElementById('table');
+  const deckEl = document.getElementById('deck');
+  const wrapper = document.getElementById('wrapper');
+  const scaleRange = document.getElementById('scaleRange');
+  const scaleOut = document.getElementById('scaleOut');
+  const rootStyle = document.documentElement.style;
+
+  const btns = {
+    up: document.getElementById('btnUp'),
+    down: document.getElementById('btnDown'),
+    left: document.getElementById('btnLeft'),
+    right: document.getElementById('btnRight'),
+    reset: document.getElementById('btnReset')
+  };
+
+  const cssNum = (v) => Number(getComputedStyle(document.documentElement).getPropertyValue(v).replace('px','')) || 0;
+  const cssFloat = (v) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(v)) || 0;
+
+  function getDims(){
+    const CARD_W = cssNum('--card-w');
+    const CARD_H = cssNum('--card-h');
+    const HALF_W = cssNum('--half-w') || Math.round(CARD_W/2);
+    const HALF_H = cssNum('--half-h') || Math.round(CARD_H/2);
+    const GRID_W = cssNum('--grid-cols') * CARD_W;
+    const GRID_H = cssNum('--grid-rows') * CARD_H;
+    const TABLE_SCALE = cssFloat('--table-scale') || 1;
+    // Intended table size based on variables
+    const TABLE_W = GRID_W * TABLE_SCALE;
+    const TABLE_H = GRID_H * TABLE_SCALE;
+    // Actual rendered size of the table element
+    const TABLE_W_ACT = tableEl.clientWidth;
+    const TABLE_H_ACT = tableEl.clientHeight;
+    return { CARD_W, CARD_H, HALF_W, HALF_H, GRID_W, GRID_H, TABLE_W, TABLE_H, TABLE_W_ACT, TABLE_H_ACT, TABLE_SCALE };
+  }
+
+  function sizeVars(){
+    // Keep the card size the same; just recompute half steps in case CSS changed
+    const root = document.documentElement.style;
+    const cw = cssNum('--card-w');
+    const ch = cssNum('--card-h');
+    root.setProperty('--half-w', Math.max(1, Math.round(cw/2)) + 'px');
+    root.setProperty('--half-h', Math.max(1, Math.round(ch/2)) + 'px');
+  }
+
+  // State
+  let moveIndex = 0;
+  let lastDir = null;
+  let cards = [];
+  let offsets = [];
+  let baseLeft = 0, baseTop = 0; // deck origin relative to TABLE
+  let usedDirs = new Set(); // tracks unique directions used this game
+
+  function centerDeck() {
+    const { CARD_W, CARD_H, TABLE_W_ACT, TABLE_H_ACT } = getDims();
+    // Center using the ACTUAL rendered size, and clamp to 0 so it's always visible
+    baseLeft = Math.max(0, Math.round((TABLE_W_ACT - CARD_W) / 2));
+    baseTop  = Math.max(0, Math.round((TABLE_H_ACT - CARD_H) / 2));
+    deckEl.style.left = baseLeft + 'px';
+    deckEl.style.top  = baseTop + 'px';
+  }
+
+  function makeCardCover() {
+    const el = document.createElement('div');
+    el.className = 'card cover';
+    el.innerHTML = `<div class="label-small">Top Card</div><div class="title">Boiler Room</div>`;
+    return el;
+  }
+
+  function makeXCard(targetQuad) {
+    const el = document.createElement('div');
+    el.className = 'card xcard';
+    const quad = document.createElement('div');
+    quad.className = 'quad';
+    for (let i=0;i<4;i++) quad.appendChild(document.createElement('div'));
+    el.appendChild(quad);
+    const xm = document.createElement('div');
+    xm.className = 'xmark';
+    xm.textContent = 'X';
+    const pos = [ {left:0,top:0}, {left:'50%',top:0}, {left:0,top:'50%'}, {left:'50%',top:'50%'} ][targetQuad];
+    Object.assign(xm.style, pos);
+    el.appendChild(xm);
+    return el;
+  }
+
+  function shuffle(arr){ for (let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+
+
+
+  function buildDeck() {
+    deckEl.innerHTML = '';
+    cards = [];
+    const quads = shuffle([0,1,2,3]);
+    const xcards = quads.map(q => makeXCard(q));
+    const cover = makeCardCover();
+    [...xcards, cover].forEach(el => { deckEl.appendChild(el); cards.push(el); });
+    cards.reverse(); // [cover, x1, x2, x3, x4]
+    offsets = cards.map(() => ({x:0, y:0}));
+  }
+
+  function setArrowsEnabled(enabled) {
+    ['up','down','left','right'].forEach(dir => btns[dir].disabled = !enabled);
+  }
+
+  function stepVector(dir){
+    const { HALF_W, HALF_H } = getDims();
+    switch(dir){
+      case 'up': return { x: 0, y: -HALF_H };
+      case 'down': return { x: 0, y: HALF_H };
+      case 'left': return { x: -HALF_W, y: 0 };
+      case 'right': return { x: HALF_W, y: 0 };
+    }
+    return { x:0, y:0 };
+  }
+
+  function canMove(dir){
+    // Prevent immediate reverse to keep something revealed
+    if (lastDir && (
+        (lastDir==='up' && dir==='down') ||
+        (lastDir==='down' && dir==='up') ||
+        (lastDir==='left' && dir==='right') ||
+        (lastDir==='right' && dir==='left')
+    )) return false;
+
+    // Rule: you cannot use all 4 directions in a single game.
+    // On the 4th move (index 3), only block if this would introduce a 4th unique direction.
+    if (moveIndex === 3) {
+      const wouldBeUniqueCount = usedDirs.has(dir) ? usedDirs.size : usedDirs.size + 1;
+      if (wouldBeUniqueCount >= 4) return false;
+    }
+
+    // Bounds check for the group that will move
+    const d = stepVector(dir);
+    const movingCount = Math.min(moveIndex + 1, cards.length);
+    const { CARD_W, CARD_H, TABLE_W_ACT: TABLE_W, TABLE_H_ACT: TABLE_H } = getDims();
+    for (let i=0;i<movingCount;i++){
+      const nextX = baseLeft + offsets[i].x + d.x;
+      const nextY = baseTop  + offsets[i].y + d.y;
+      const left = nextX, right = nextX + CARD_W, top = nextY, bottom = nextY + CARD_H;
+      if (left < 0 || right > TABLE_W || top < 0 || bottom > TABLE_H) return false;
+    }
+    return true;
+  }
+
+function applyDirectionalLocks(){
+    ['up','down','left','right'].forEach(dir => btns[dir].disabled = false);
+    if (lastDir) btns[{up:'down',down:'up',left:'right',right:'left'}[lastDir]].disabled = true;
+    ['up','down','left','right'].forEach(dir => { if (!canMove(dir)) btns[dir].disabled = true; });
+  }
+
+  function renderTransforms(){
+    for (let i=0;i<cards.length;i++){
+      const o = offsets[i];
+      cards[i].style.transform = `translate(${o.x}px, ${o.y}px)`;
+    }
+  }
+
+  function move(dir){
+    if (moveIndex >= 4) return;
+    if (!canMove(dir)) return;
+    const d = stepVector(dir);
+    const movingCount = Math.min(moveIndex + 1, cards.length);
+    for (let i=0;i<movingCount;i++){ offsets[i].x += d.x; offsets[i].y += d.y; }
+    renderTransforms();
+    usedDirs.add(dir);
+    lastDir = dir;
+    moveIndex++;
+    if (moveIndex >= 4) { setArrowsEnabled(false); return; }
+    applyDirectionalLocks();
+  }
+
+  function resetGame(){
+    moveIndex = 0; lastDir = null;
+    usedDirs = new Set();
+    sizeVars();
+    buildDeck();
+    centerDeck();
+    renderTransforms();
+    setArrowsEnabled(true);
+    applyDirectionalLocks();
+    // Center again next frame in case layout changed sizes
+    requestAnimationFrame(() => { centerDeck(); renderTransforms(); applyDirectionalLocks(); });
+  }
+
+  function setScale(val){
+    rootStyle.setProperty('--table-scale', String(val));
+    scaleOut.textContent = Math.round(val * 100) + '%';
+    // Wait a frame so CSS applies, then reset/center using actual rendered size
+    requestAnimationFrame(() => resetGame());
+  }
+
+  // wire controls
+  btns.up.addEventListener('click', () => move('up'));
+  btns.down.addEventListener('click', () => move('down'));
+  btns.left.addEventListener('click', () => move('left'));
+  btns.right.addEventListener('click', () => move('right'));
+  btns.reset.addEventListener('click', resetGame);
+
+  // slider events
+  scaleRange.addEventListener('input', (e) => setScale(parseFloat(e.target.value)));
+
+  // keyboard controls (Arrow keys)
+  window.addEventListener('keydown', (e) => {
+    const active = document.activeElement;
+    // Let the slider use arrows when focused
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+      if (active.id === 'scaleRange') return;
+    }
+    let dir = null;
+    if (e.key === 'ArrowUp') dir = 'up';
+    else if (e.key === 'ArrowDown') dir = 'down';
+    else if (e.key === 'ArrowLeft') dir = 'left';
+    else if (e.key === 'ArrowRight') dir = 'right';
+    if (dir) { e.preventDefault(); move(dir); }
+  });
+
+  // keep centered on resize (card size stays the same)
+  window.addEventListener('resize', () => { resetGame(); });
+
+  // init
+  // Initialize slider from current CSS var (in case it changed in code)
+  const currentScale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--table-scale')) || 0.8;
+  scaleRange.value = String(currentScale);
+  scaleOut.textContent = Math.round(currentScale * 100) + '%';
+  resetGame();
+})();
+</script>
+</body>
+</html>
